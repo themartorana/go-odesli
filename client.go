@@ -81,7 +81,7 @@ type GetLinksResponse struct {
 
 	// A collection of objects. Each key is a platform, and each value is an
 	// object that contains data for linking to the match
-	LinksByPlatform map[string]LinkByPlatform
+	LinksByPlatform map[Platform]LinkByPlatform
 
 	// A collection of objects. Each key is a unique identifier for a streaming
 	// entity, and each value is an object that contains data for that entity, such
