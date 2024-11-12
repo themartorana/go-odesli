@@ -4,8 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"log"
 	"net/http"
 	"net/url"
+	"strconv"
 	"time"
 )
 
@@ -117,6 +120,37 @@ type Entity struct {
 	Platforms []Platform `json:"platforms,omitempty"`
 }
 
+func (e *Entity) UnmarshalJSON(data []byte) error {
+	type Alias Entity
+	aux := &struct {
+		Id interface{} `json:"id"` // unmarshal as string or number as priority field for id
+		*Alias
+	}{
+		Alias: (*Alias)(e),
+	}
+
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+
+	switch id := aux.Id.(type) {
+	case string:
+		e.Id = id
+	case int:
+		e.Id = strconv.Itoa(id)
+	case int64:
+		e.Id = strconv.FormatInt(id, 10)
+	case float32:
+		e.Id = strconv.FormatFloat(float64(id), 'f', -1, 64)
+	case float64:
+		e.Id = strconv.FormatFloat(id, 'f', -1, 64)
+	default:
+		return fmt.Errorf("unexpected type for id: %T", id)
+	}
+
+	return nil
+}
+
 type LinkByPlatform struct {
 
 	// The unique ID for this entity. Use it to look up data about this entity
@@ -141,10 +175,12 @@ type API interface {
 
 type ClientOption struct {
 	APIToken string
+	Debug    bool
 }
 
 type Client struct {
 	client *http.Client
+	debug  bool
 }
 
 func NewClient(opt ClientOption) (*Client, error) {
@@ -160,18 +196,23 @@ func NewClient(opt ClientOption) (*Client, error) {
 			Transport: rt,
 			Timeout:   DefaultHTTPTimeout,
 		},
+		debug: opt.Debug,
 	}, nil
 }
 
 func (c *Client) GetLinks(ctx context.Context, r GetLinksRequest) (GetLinksResponse, error) {
+	path := fmt.Sprint(LinksPath, "?", r.GetURLValues().Encode())
 	req, err := http.NewRequestWithContext(
 		ctx,
 		http.MethodGet,
-		fmt.Sprint(LinksPath, "?", r.GetURLValues().Encode()),
+		path,
 		nil,
 	)
 	if err != nil {
 		return GetLinksResponse{}, err
+	}
+	if c.debug {
+		log.Printf("request: %s", req.URL.String())
 	}
 	resp, err := c.client.Do(req)
 	if err != nil {
@@ -183,7 +224,14 @@ func (c *Client) GetLinks(ctx context.Context, r GetLinksRequest) (GetLinksRespo
 		return GetLinksResponse{}, err
 	}
 	res := GetLinksResponse{}
-	err = json.NewDecoder(resp.Body).Decode(&res)
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return GetLinksResponse{}, err
+	}
+	if c.debug {
+		log.Printf("body: %s", string(body))
+	}
+	err = json.Unmarshal(body, &res)
 	if err != nil {
 		return GetLinksResponse{}, err
 	}
